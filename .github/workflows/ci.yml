@@ -1,18 +1,17 @@
-name: ci
+name: wider
 on:
   push:
-  pull_request:
-  schedule:
-  - cron:  '0 3 * * 6' # 3am Saturday
 jobs:
-  test:
+  # Not for upstream: the test suite on more compilers than tested-with names,
+  # with the fix and then without it.
+  plain:
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        ghc: ['9.6', '9.4', '9.2', '9.0', '8.10', '8.8']
+        ghc: ['9.12', '9.10', '9.8', '9.6', '9.4', '9.2', '9.0', '8.10', '8.8']
         include:
         - os: windows-latest
           ghc: '9.6'
@@ -22,14 +21,21 @@ jobs:
     steps:
     - run: git config --global core.autocrlf false
     - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
     - uses: haskell-actions/setup@v2
-      id: setup-haskell
       with:
         ghc-version: ${{ matrix.ghc }}
-    - run: cabal v2-freeze --enable-tests
-    - uses: actions/cache@v6
-      with:
-        path: ${{ steps.setup-haskell.outputs.cabal-store }}
-        key: ${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
-        restore-keys: ${{ runner.os }}-${{ matrix.ghc }}-
-    - uses: ndmitchell/neil@master
+    - run: cabal update
+    - name: Test suite with the fix
+      run: cabal test --test-show-details=direct
+    - name: Test suite without the fix
+      shell: bash
+      run: |
+        git show HEAD~2:src/Text/HTML/TagSoup/Implementation.hs > src/Text/HTML/TagSoup/Implementation.hs
+        if cabal test --test-show-details=direct > without-fix.log 2>&1; then
+          echo "RESULT: no leak detected without the fix on GHC ${{ matrix.ghc }} (${{ matrix.os }})"
+        else
+          grep "Space leak" without-fix.log
+          echo "RESULT: leak detected without the fix on GHC ${{ matrix.ghc }} (${{ matrix.os }})"
+        fi
